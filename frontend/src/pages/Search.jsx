@@ -1,0 +1,451 @@
+import { useState, useEffect, useRef } from 'react';
+import { Search as SearchIcon, X, Mic, Clock, TrendingUp, ChevronRight, ArrowUpRight, ArrowLeft } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import RecipeCard from '../components/RecipeCard';
+import { allRecipes, cuisines } from '../data/mockData';
+
+const STORAGE_KEY = 'snapcook_recent_searches';
+const MAX_RECENT = 8;
+
+const trendingTags = [
+  { label: '#QuickMeals',  query: 'quick' },
+  { label: '#HighProtein', query: 'protein' },
+  { label: '#Comfort',     query: 'comfort' },
+  { label: '#Vegan',       query: 'vegan' },
+  { label: '#Pakistani',   query: 'pakistani' },
+  { label: '#Pasta',       query: 'pasta' },
+  { label: '#Biryani',     query: 'biryani' },
+  { label: '#Budget',      query: 'budget' },
+];
+
+const sortOptions = [
+  { id: 'relevant', label: 'Best Match' },
+  { id: 'rating',   label: 'Top Rated' },
+  { id: 'fastest',  label: 'Fastest' },
+  { id: 'calories', label: 'Fewest Cal' },
+];
+
+const categoryChips = [
+  { id: 'all',       label: 'All' },
+  { id: 'breakfast', label: 'Breakfast' },
+  { id: 'lunch',     label: 'Lunch' },
+  { id: 'dinner',    label: 'Dinner' },
+  { id: 'snacks',    label: 'Snacks' },
+  { id: 'desserts',  label: 'Desserts' },
+];
+
+function loadRecent() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; }
+  catch { return []; }
+}
+
+function saveRecent(list) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+}
+
+function scoreRecipe(recipe, q) {
+  const ql = q.toLowerCase();
+  let score = 0;
+  if (recipe.title.toLowerCase().startsWith(ql)) score += 10;
+  if (recipe.title.toLowerCase().includes(ql)) score += 5;
+  if (recipe.cuisine.toLowerCase().includes(ql)) score += 4;
+  recipe.tags.forEach(t => { if (t.includes(ql)) score += 3; });
+  if (recipe.category.toLowerCase().includes(ql)) score += 2;
+  recipe.ingredients?.forEach(ing => { if (ing.name?.toLowerCase().includes(ql)) score += 1; });
+  return score;
+}
+
+export default function Search() {
+  const navigate = useNavigate();
+  const inputRef = useRef(null);
+
+  const [query, setQuery] = useState('');
+  const [sort, setSort] = useState('relevant');
+  const [category, setCategory] = useState('all');
+  const [viewMode, setViewMode] = useState('grid');
+  const [recentSearches, setRecentSearches] = useState(loadRecent);
+
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  function commitSearch(q) {
+    const trimmed = q.trim();
+    if (!trimmed) return;
+    setRecentSearches(prev => {
+      const next = [trimmed, ...prev.filter(s => s !== trimmed)].slice(0, MAX_RECENT);
+      saveRecent(next);
+      return next;
+    });
+  }
+
+  function handleQueryChange(val) {
+    setQuery(val);
+  }
+
+  function handleKeyDown(e) {
+    if (e.key === 'Enter') commitSearch(query);
+  }
+
+  function applyQuery(q) {
+    setQuery(q);
+    commitSearch(q);
+    inputRef.current?.blur();
+  }
+
+  function removeRecent(item) {
+    setRecentSearches(prev => {
+      const next = prev.filter(s => s !== item);
+      saveRecent(next);
+      return next;
+    });
+  }
+
+  function clearAllRecent() {
+    setRecentSearches([]);
+    saveRecent([]);
+  }
+
+  // --- Filtering ---
+  let results = [];
+  if (query.length > 0) {
+    results = allRecipes
+      .map(r => ({ ...r, _score: scoreRecipe(r, query) }))
+      .filter(r => r._score > 0);
+
+    if (category !== 'all') {
+      results = results.filter(r => r.category === category);
+    }
+
+    results = results.sort((a, b) => {
+      if (sort === 'relevant')  return b._score - a._score;
+      if (sort === 'rating')    return b.rating - a.rating;
+      if (sort === 'fastest')   return a.time - b.time;
+      if (sort === 'calories')  return a.calories - b.calories;
+      return 0;
+    });
+  }
+
+  // Cuisine matches for the query
+  const cuisineMatches = query.length > 1
+    ? cuisines.filter(c => c.label.toLowerCase().includes(query.toLowerCase()))
+    : [];
+
+  const hasResults = results.length > 0;
+  const isSearching = query.length > 0;
+
+  return (
+    <div style={{ minHeight: '100vh', background: 'var(--color-bg)', paddingBottom: 'calc(var(--bottom-nav-h) + 20px)' }}>
+
+      {/* ── STICKY HEADER + SEARCH BAR ── */}
+      <div style={{
+        position: 'sticky', top: 0, zIndex: 20,
+        background: 'var(--color-surface)',
+        borderBottom: '1px solid var(--color-border)',
+        boxShadow: 'var(--shadow-sm)',
+      }}>
+        {/* Back + Search row */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px' }}>
+          <button
+            onClick={() => navigate(-1)}
+            style={{
+              width: 38, height: 38, borderRadius: '50%', flexShrink: 0,
+              background: 'var(--color-surface-2)', border: '1px solid var(--color-border)',
+              cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              color: 'var(--color-text-2)',
+            }}
+          >
+            <ArrowLeft size={18} />
+          </button>
+          <div style={{ position: 'relative', flex: 1 }}>
+            <SearchIcon size={17} style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-3)', pointerEvents: 'none' }} />
+            <input
+              ref={inputRef}
+              className="input input-with-icon"
+              type="text"
+              placeholder="Search recipes, cuisines, ingredients…"
+              value={query}
+              onChange={e => handleQueryChange(e.target.value)}
+              onKeyDown={handleKeyDown}
+              style={{ borderRadius: 'var(--radius-full)', paddingRight: query ? 80 : 44 }}
+            />
+            {query ? (
+              <button
+                onClick={() => { setQuery(''); inputRef.current?.focus(); }}
+                style={{ position: 'absolute', right: 42, top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-3)', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', padding: 4 }}
+              >
+                <X size={16} />
+              </button>
+            ) : null}
+            <button
+              style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-3)', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', padding: 4 }}
+              title="Voice search"
+            >
+              <Mic size={18} />
+            </button>
+          </div>
+        </div>
+
+        {/* Category chips — shown when there are results */}
+        {isSearching && hasResults && (
+          <div className="scroll-row" style={{ padding: '0 16px 10px', gap: 6 }}>
+            {categoryChips.map(c => (
+              <button
+                key={c.id}
+                onClick={() => setCategory(c.id)}
+                className={`pill-toggle${category === c.id ? ' active' : ''}`}
+                style={{ fontSize: 'var(--text-xs)' }}
+              >
+                {c.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ── NO QUERY — SUGGESTIONS VIEW ── */}
+      {!isSearching && (
+        <div style={{ padding: '16px 16px 0' }}>
+
+          {/* Recent Searches */}
+          {recentSearches.length > 0 && (
+            <div className="animate-fadeUp" style={{ marginBottom: 28 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Clock size={14} color="var(--color-text-3)" />
+                  <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-3)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                    Recent
+                  </span>
+                </div>
+                <button
+                  onClick={clearAllRecent}
+                  style={{ fontSize: 'var(--text-xs)', color: 'var(--color-primary)', fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-body)' }}
+                >
+                  Clear all
+                </button>
+              </div>
+              <div style={{ background: 'var(--color-surface)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)', overflow: 'hidden' }}>
+                {recentSearches.map((s, i) => (
+                  <div
+                    key={s}
+                    style={{
+                      display: 'flex', alignItems: 'center',
+                      borderBottom: i < recentSearches.length - 1 ? '1px solid var(--color-border)' : 'none',
+                    }}
+                  >
+                    <button
+                      onClick={() => applyQuery(s)}
+                      style={{
+                        flex: 1, display: 'flex', alignItems: 'center', gap: 10,
+                        padding: '13px 16px',
+                        background: 'none', border: 'none', cursor: 'pointer',
+                        color: 'var(--color-text)', fontSize: 'var(--text-base)',
+                        textAlign: 'left', fontFamily: 'var(--font-body)',
+                      }}
+                    >
+                      <Clock size={13} color="var(--color-text-3)" style={{ flexShrink: 0 }} />
+                      <span style={{ flex: 1 }}>{s}</span>
+                      <ArrowUpRight size={13} color="var(--color-text-3)" style={{ flexShrink: 0 }} />
+                    </button>
+                    <button
+                      onClick={() => removeRecent(s)}
+                      style={{ padding: '13px 14px 13px 0', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-3)', display: 'flex' }}
+                      aria-label={`Remove ${s}`}
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Trending Tags */}
+          <div className="animate-fadeUp delay-1" style={{ marginBottom: 28 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}>
+              <TrendingUp size={14} color="var(--color-primary)" />
+              <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-3)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                Trending
+              </span>
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {trendingTags.map(tag => (
+                <button
+                  key={tag.label}
+                  onClick={() => applyQuery(tag.query)}
+                  style={{
+                    padding: '8px 14px',
+                    borderRadius: 'var(--radius-full)',
+                    background: 'var(--color-surface)',
+                    border: '1px solid var(--color-border)',
+                    fontSize: 'var(--text-sm)', fontWeight: 500,
+                    color: 'var(--color-primary)',
+                    cursor: 'pointer', fontFamily: 'var(--font-body)',
+                    transition: 'background 0.15s, transform 0.15s',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-primary-light)'; e.currentTarget.style.transform = 'scale(1.04)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'var(--color-surface)'; e.currentTarget.style.transform = ''; }}
+                >
+                  {tag.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Browse by Cuisine */}
+          <div className="animate-fadeUp delay-2" style={{ marginBottom: 28 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-3)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                Browse by Cuisine
+              </span>
+              <button
+                onClick={() => navigate('/explore')}
+                style={{ fontSize: 'var(--text-xs)', color: 'var(--color-primary)', fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: 2 }}
+              >
+                See all <ChevronRight size={12} />
+              </button>
+            </div>
+            <div className="scroll-row" style={{ gap: 10 }}>
+              {cuisines.slice(0, 6).map(c => (
+                <div
+                  key={c.id}
+                  onClick={() => navigate(`/cuisine/${c.id}`)}
+                  style={{
+                    flexShrink: 0, width: 90, height: 90,
+                    borderRadius: 'var(--radius-md)',
+                    background: c.gradient,
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                    gap: 4, cursor: 'pointer',
+                    boxShadow: 'var(--shadow-sm)',
+                    transition: 'transform 0.2s',
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.transform = 'scale(1.05)'}
+                  onMouseLeave={e => e.currentTarget.style.transform = ''}
+                >
+                  <span style={{ fontSize: 28 }}>{c.emoji}</span>
+                  <span style={{ fontSize: 10, fontWeight: 600, color: '#fff', textAlign: 'center' }}>{c.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Popular Recipes */}
+          <div className="animate-fadeUp delay-3">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-3)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                Popular Right Now
+              </span>
+            </div>
+            <div className="scroll-row" style={{ gap: 12 }}>
+              {allRecipes.sort((a, b) => b.reviewCount - a.reviewCount).slice(0, 6).map(r => (
+                <RecipeCard key={r.id} recipe={r} />
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── SEARCH RESULTS ── */}
+      {isSearching && (
+        <div style={{ padding: '16px 16px 0' }}>
+
+          {/* Cuisine match pills */}
+          {cuisineMatches.length > 0 && (
+            <div style={{ marginBottom: 16 }}>
+              <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-3)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 8 }}>
+                Cuisine
+              </p>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {cuisineMatches.map(c => (
+                  <button
+                    key={c.id}
+                    onClick={() => navigate(`/cuisine/${c.id}`)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 8,
+                      padding: '8px 14px',
+                      background: c.gradient,
+                      borderRadius: 'var(--radius-full)',
+                      border: 'none', cursor: 'pointer',
+                      color: '#fff', fontSize: 'var(--text-sm)', fontWeight: 600,
+                      fontFamily: 'var(--font-body)',
+                    }}
+                  >
+                    <span>{c.emoji}</span> {c.label} Kitchen
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {hasResults ? (
+            <>
+              {/* Sort + view toggle */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-2)', fontWeight: 500 }}>
+                  {results.length} result{results.length !== 1 ? 's' : ''}
+                </span>
+                <button
+                  onClick={() => setViewMode(v => v === 'grid' ? 'list' : 'grid')}
+                  style={{
+                    padding: '6px 10px', borderRadius: 'var(--radius-xs)',
+                    background: 'var(--color-surface-2)', border: '1px solid var(--color-border)',
+                    fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--color-text-2)',
+                    cursor: 'pointer', fontFamily: 'var(--font-body)',
+                  }}
+                >
+                  {viewMode === 'grid' ? '☰ List' : '⊞ Grid'}
+                </button>
+              </div>
+
+              {/* Sort pills */}
+              <div className="scroll-row" style={{ marginBottom: 16, gap: 6 }}>
+                {sortOptions.map(s => (
+                  <button key={s.id} onClick={() => setSort(s.id)} className={`pill-toggle${sort === s.id ? ' active' : ''}`} style={{ fontSize: 'var(--text-xs)' }}>
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+
+              {viewMode === 'grid' ? (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  {results.map((r, i) => (
+                    <div key={r.id} className="animate-fadeUp" style={{ animationDelay: `${i * 0.04}s` }}>
+                      <RecipeCard recipe={r} />
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {results.map((r, i) => (
+                    <div key={r.id} className="animate-fadeUp" style={{ animationDelay: `${i * 0.04}s` }}>
+                      <RecipeCard recipe={r} variant="list" />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="empty-state animate-fadeUp">
+              <div className="empty-state-icon">🔍</div>
+              <h3 style={{ fontFamily: 'var(--font-display)', fontSize: 'var(--text-lg)', fontWeight: 600 }}>
+                No results for "{query}"
+              </h3>
+              <p style={{ color: 'var(--color-text-3)', fontSize: 'var(--text-sm)', marginBottom: 16 }}>
+                Try a different ingredient, dish name, or cuisine
+              </p>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center' }}>
+                {trendingTags.slice(0, 4).map(tag => (
+                  <button
+                    key={tag.label}
+                    onClick={() => applyQuery(tag.query)}
+                    className="btn btn-secondary btn-sm"
+                  >
+                    {tag.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
